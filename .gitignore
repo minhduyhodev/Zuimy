@@ -1,5 +1,0 @@
-# Ẩn thư mục docs và mọi thứ bên trong nó
-docs/*
-
-# Ẩn tệp agent.md ở bất kỳ đâu trong dự án
-AGENTS.md
