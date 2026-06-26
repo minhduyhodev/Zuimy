@@ -7,7 +7,7 @@
 ## Sơ đồ ERD tổng quan (dạng text)
 
 ```
-users ──┬──< enrollments >──┬── courses ──┬──< modules >──< lessons
+users ──┬──< enrollments >──┬── courses ──┬──< modules >──< lessons ──< lesson_comments
         │                   │             │
         │                   │             ├──< course_reviews
         │                   │             │
@@ -16,6 +16,8 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
         │      └──> vouchers (FK trực tiếp trong orders)
         │
         ├──< lesson_progress >── lessons
+        │
+        ├──< lesson_comments >── lessons
         │
         ├──< certificates >── courses
         │
@@ -35,7 +37,7 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 | password_hash | VARCHAR(255) | null nếu login Google |
 | full_name | VARCHAR(100) | |
 | avatar_url | VARCHAR(255) | |
-| role | ENUM('student','instructor','admin') | default 'student' |
+| role | ENUM('student','instructor','admin','staff') | default 'student' |
 | google_id | VARCHAR(100) | null nếu đăng ký thường |
 | created_at | TIMESTAMP | |
 | updated_at | TIMESTAMP | |
@@ -123,9 +125,10 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 | subtotal | DECIMAL(10,2) | tổng trước giảm giá |
 | discount_amount | DECIMAL(10,2) | số tiền được giảm |
 | total | DECIMAL(10,2) | số tiền thực tế phải thanh toán |
-| status | ENUM('pending','paid','failed','cancelled') | trạng thái thanh toán |
-| payment_method | ENUM('vietqr','momo') | Đổi vnpay thành vietqr |
-| transaction_reference | VARCHAR(150) | Nội dung chuyển khoản hoặc mã tham chiếu giao dịch (để đối soát Webhook) |
+| status | ENUM('pending','submitted_proof','paid','failed','cancelled','rejected_proof') | trạng thái đơn hàng |
+| payment_method | ENUM('vietqr','stripe') | Phương thức thanh toán |
+| transaction_reference | VARCHAR(150) | Nội dung chuyển khoản hoặc mã tham chiếu giao dịch (đối soát Stripe hoặc nhập tay) |
+| transaction_proof_url | VARCHAR(255) | nullable, link ảnh minh chứng chuyển khoản tải lên cho VietQR |
 | created_at | TIMESTAMP | |
 | paid_at | TIMESTAMP | nullable |
 
@@ -153,6 +156,9 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 | min_order_amount | DECIMAL(10,2) | nullable |
 | max_uses | INT | nullable, null = không giới hạn |
 | used_count | INT | default 0 |
+| scope | ENUM('global','course') | Phạm vi áp dụng: toàn sàn hoặc chỉ khóa học |
+| course_id | UUID (FK → courses.id) | nullable, chỉ định khóa học nếu scope = course |
+| created_by_id | UUID (FK → users.id) | người tạo (Admin tạo global, Instructor tạo course) |
 | valid_from | TIMESTAMP | |
 | valid_until | TIMESTAMP | |
 
@@ -189,7 +195,20 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 
 ---
 
-## 12. `course_reviews` — Đánh giá khóa học
+## 12. `lesson_comments` — Bình luận, thảo luận bài học (Q&A)
+
+| Cột | Loại | Ghi chú |
+|---|---|---|
+| id | UUID (PK) | |
+| lesson_id | UUID (FK → lessons.id) | |
+| user_id | UUID (FK → users.id) | Người bình luận |
+| content | TEXT | Nội dung bình luận |
+| parent_id | UUID (FK → lesson_comments.id) | nullable, tự tham chiếu làm reply |
+| created_at | TIMESTAMP | |
+
+---
+
+## 13. `course_reviews` — Đánh giá khóa học
 
 | Cột | Loại | Ghi chú |
 |---|---|---|
@@ -202,7 +221,7 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 
 ---
 
-## 13. `certificates` — Chứng chỉ hoàn thành
+## 14. `certificates` — Chứng chỉ hoàn thành
 
 | Cột | Loại | Ghi chú |
 |---|---|---|
@@ -214,7 +233,7 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 
 ---
 
-## 14. `withdrawal_requests` — Yêu cầu rút tiền giảng viên
+## 15. `withdrawal_requests` — Yêu cầu rút tiền giảng viên
 
 | Cột | Loại | Ghi chú |
 |---|---|---|
@@ -239,6 +258,11 @@ users.id            ← orders.user_id
 users.id            ← enrollments.user_id
 users.id            ← lesson_progress.user_id
 users.id            ← withdrawal_requests.instructor_id
+users.id            ← lesson_comments.user_id
+lessons.id          ← lesson_comments.lesson_id
+lesson_comments.id  ← lesson_comments.parent_id
+vouchers.created_by_id ← users.id
+vouchers.course_id  ← courses.id
 courses.id          ← modules.course_id
 modules.id          ← lessons.module_id
 courses.id          ← order_items.course_id
