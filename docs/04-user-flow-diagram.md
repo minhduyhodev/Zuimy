@@ -41,12 +41,12 @@
        ▼
 ┌─────────────────┐
 │  Checkout         │
-│  → Quét VietQR    │
+│  → VietQR / Stripe│
 └──────┬───────────┘
        │
        ├──► Hủy thanh toán / Hết hạn ──► Quay lại giỏ hàng
        │
-       ▼ Thành công (Webhook xử lý ngầm tự động)
+       ▼ Thành công (Stripe Webhook hoặc Staff duyệt Bill VietQR)
 ┌─────────────────┐
 │  Enrollment       │
 │  được tạo         │
@@ -105,32 +105,36 @@
         ▼
 [Tạo Order — status: PENDING]
         │
-        ▼
-[Hiển thị mã QR thanh toán động VietQR & Nội dung chuyển khoản]
+        ├─── Chọn VietQR ──────────────────────────────────────────┐
+        │                                                          │
+        ├─── Chọn Stripe ──────────────────┐                       │
+        ▼                                  ▼                       ▼
+[Redirect Stripe Checkout]          [Hiển thị QR chuyển khoản]   [Học viên chuyển tiền]
+        │                                  │                       │
+        │ Học viên điền thẻ                │ Chuyển khoản xong     │ Tải ảnh Bill giao dịch lên
+        ▼                                  ▼                       ▼
+[Stripe Webhook về Backend]        [Không khả dụng]              [Order chuyển thành SUBMITTED_PROOF]
+        │                                                          │
+        │                                                          │ Staff check số dư ngân hàng thực tế
+        │                                                          ▼
+        │                                                    [Staff nhấn "Phê duyệt"]
+        │                                                          │
+        ▼                                                          ▼
+[DB Transaction với khóa dòng SELECT FOR UPDATE trên bảng orders] ◄┘
         │
-        │ Học viên thực hiện chuyển khoản bằng app ngân hàng
-        ▼
-[Ngân hàng bắn Webhook giao dịch về Backend]
+        ├─── Trùng lặp/Đã duyệt (status đã là PAID) ──► Trả về HTTP 200 / Kết thúc ngay
         │
-        ▼
-[Backend xác thực chữ ký Webhook (Signature Verification)]
-        │
-        ▼
-[Mở DB Transaction với khóa dòng SELECT FOR UPDATE trên bảng orders]
-        │
-        ├─── Trùng lặp (status đã là PAID) ──► Trả về HTTP 200 ngay (Idempotent API)
-        │
-        ▼ Chưa xử lý (status là PENDING)
+        ▼ Chưa xử lý (status là PENDING hoặc SUBMITTED_PROOF)
 [Cập nhật Order status = PAID]
         │
-        ├──► Cộng tiền vào ví balance của Giảng viên sở hữu (chia sẻ 80/20)
+        ├──► Cộng tiền vào ví balance của Giảng viên (theo tỷ lệ cấu hình sau voucher)
         ├──► Tạo Enrollment cho từng course trong đơn hàng
         ├──► Đẩy sự kiện sang Kafka "order.paid"
         │       ├─ Consumer: gửi email hóa đơn thành công (Spring Mail)
         │       └─ Consumer: xóa giỏ hàng trong Redis
         │
         ▼
-[Frontend nhận tín hiệu tự động chuyển sang trang "Khóa học của tôi"]
+[Frontend tự động chuyển hướng sang trang "Khóa học của tôi"]
 ```
 
 ---
@@ -272,34 +276,35 @@
 ## 6. Sơ đồ phân quyền các vai trò hệ thống
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   STUDENT    │     │  INSTRUCTOR  │     │    ADMIN     │
-├──────────────┤     ├──────────────┤     ├──────────────┤
-│ Browse course│     │ Create course│     │ Manage users │
-│ Add to cart  │     │ Add lessons  │     │ Manage       │
-│ Apply voucher│     │ Direct Up R2 │     │   vouchers   │
-│ Checkout QR  │     │ Request pub  │     │ Moderate     │
-│ Watch video  │     │ View revenue │     │   courses    │
-│ Ask AI Chat  │     │ View students│     │ Manual pay   │
-│ Get cert PDF │     │ Withdraw request │ Approve withdraw│
-│ Write review │     │              │     │              │
-└──────────────┘     └──────────────┘     └──────────────┘
-        │                    │                    │
-        └────────────────────┴────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  Shared Backend  │
-                    │  PostgreSQL      │
-                    │  Redis (cache)   │
-                    │  Kafka (events)  │
-                    └──────────────────┘
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   STUDENT    │     │  INSTRUCTOR  │     │    STAFF     │     │    ADMIN     │
+├──────────────┤     ├──────────────┤     ├──────────────┤     ├──────────────┤
+│ Browse course│     │ Create course│     │ View pending │     │ Manage users │
+│ Add to cart  │     │ Add lessons  │     │   VietQR proof│     │ Configure    │
+│ Apply voucher│     │ Create voucher│     │ Approve/Reject│     │   system     │
+│ Checkout     │     │ Direct Up R2 │     │   payment proof│    │ Manage       │
+│ Watch video  │     │ Request pub  │     │              │     │   vouchers   │
+│ Ask AI Chat  │     │ View revenue │     │              │     │ Moderate     │
+│ Ask Q&A comments│  │ View students│     │              │     │   courses    │
+│ Get cert PDF │     │ Withdraw request│  │              │     │ Approve      │
+│ Write review │     │              │     │              │     │   withdrawals│
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+        │                    │                    │                    │
+        └────────────────────┴─────────┬──────────┴────────────────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │  Shared Backend  │
+                              │  PostgreSQL      │
+                              │  Redis (cache)   │
+                              │  Kafka (events)  │
+                              └──────────────────┘
 ```
 
 ---
 
 ## Điểm cần lưu ý khi code (Dành cho Developer)
 
-- **Nguyên lý Idempotency thanh toán:** Giao dịch VietQR bắn webhook trùng lặp do retry phải bị chặn ở database layer bằng transaction với khóa dòng (`SELECT ... FOR UPDATE` trong JPA).
+- **Nguyên lý Idempotency thanh toán:** Giao dịch Stripe Webhook trùng lặp hoặc thao tác duyệt trùng từ Staff phải bị chặn ở database layer bằng transaction với khóa dòng (`SELECT ... FOR UPDATE` trong JPA) để đảm bảo không xử lý đơn hàng PAID nhiều lần.
 - **Nguyên lý Zero Trust Tiến độ:** Không được cập nhật thẳng tiến độ từ client gửi lên. Bắt buộc phải validate khoảng thời gian trôi qua thực tế ở server và cache tạm bằng Redis Hash trước khi ghi dồn (flush) xuống PostgreSQL.
 - **Bảo mật video ở mức tối đa:** Ẩn toàn bộ `video_id` ở API Đề cương. Chỉ trả link động 15 phút (Presigned GET URL R2) hoặc ID Youtube qua API xem bài học có xác thực JWT của Spring Security.
 - **Vấn đề đồng thì (Concurrency) của Voucher:** Khi học viên Checkout cùng lúc áp dụng voucher giới hạn lượt dùng, phải sử dụng transaction hoặc khóa bi quan/lạc quan để tránh việc vượt quá số lượng dùng tối đa (`max_uses`).

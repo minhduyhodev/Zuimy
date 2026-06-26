@@ -1,399 +1,1060 @@
-# API Specification — Nền tảng học trực tuyến (Udemy Mini)
+# API Specification — Nền tảng học trực tuyến (Zuimy)
 
-> Base URL: `/api/v1`
+> Base URL: `/api/v1`  
 > Authentication: Bearer Token (JWT) trong header `Authorization: Bearer <token>`
 
 ---
 
-## 1. Authentication
+## Quy chuẩn API Response (API Response Standard)
+
+Tất cả các dữ liệu trả về từ hệ thống Zuimy đều tuân theo các quy tắc chuẩn hóa sau đây:
+
+1.  **Định dạng dữ liệu:** JSON.
+2.  **Quy tắc đặt tên (Naming Convention):**
+    *   Cơ sở dữ liệu lưu dưới dạng `snake_case`.
+    *   Các khóa JSON trong API Request/Response sử dụng **`camelCase`** (được Spring Boot tự động chuyển đổi qua Jackson ObjectMapper).
+3.  **Cơ chế lưu dấu thời gian (Timestamp):**
+    *   Mỗi response luôn đi kèm trường `timestamp` ở **dưới cùng (cuối)** của đối tượng JSON, được định dạng theo chuẩn ISO 8601 UTC (`yyyy-MM-dd'T'HH:mm:ss'Z'`).
+4.  **Cấu trúc Response Thành công (Success Response):**
+    *   *Dữ liệu đơn lẻ / Không phân trang:*
+        ```json
+        {
+          "success": true,
+          "data": {
+            "id": "uuid-value",
+            "fieldName": "value"
+          },
+          "timestamp": "2026-06-26T12:00:00Z"
+        }
+        ```
+    *   *Dữ liệu danh sách phân trang (Paginated List):*
+        ```json
+        {
+          "success": true,
+          "data": [
+            { "id": "...", "fieldName": "..." }
+          ],
+          "pagination": {
+            "page": 1,
+            "limit": 12,
+            "total": 86
+          },
+          "timestamp": "2026-06-26T12:00:00Z"
+        }
+        ```
+5.  **Cấu trúc Response Lỗi (Error Response):**
+    *   Trả về mã lỗi HTTP tương ứng (400, 401, 403, 404, 500).
+    *   Body response theo format chuẩn sau:
+        ```json
+        {
+          "success": false,
+          "error": {
+            "code": "MÃ_LỖI",
+            "message": "Thông điệp mô tả lỗi chi tiết"
+          },
+          "timestamp": "2026-06-26T12:00:00Z"
+        }
+        ```
+    *   *Một số mã lỗi đặc trưng:*
+        *   `INVALID_CREDENTIALS`: Sai email hoặc mật khẩu.
+        *   `UNAUTHORIZED`: Chưa đăng nhập hoặc token hết hạn/không hợp lệ.
+        *   `FORBIDDEN`: Không có quyền truy cập (chưa sở hữu khóa học, sai phân quyền role).
+        *   `COURSE_NOT_FOUND`: Khóa học không tồn tại.
+        *   `VOUCHER_INVALID`: Voucher không hợp lệ hoặc đã hết lượt sử dụng.
+        *   `INSUFFICIENT_BALANCE`: Ví giảng viên không đủ số dư thực hiện rút tiền.
+
+---
+
+## 1. Authentication (Xác thực)
 
 ### POST `/auth/register`
-Đăng ký tài khoản học viên.
+Đăng ký tài khoản học viên mới.
 
 **Request:**
 ```json
 {
   "email": "student@example.com",
   "password": "secret123",
-  "full_name": "Nguyễn Văn A"
+  "fullName": "Nguyễn Văn A"
 }
 ```
 
 **Response 201:**
 ```json
 {
-  "user": { "id": "uuid", "email": "...", "role": "student" },
-  "access_token": "jwt...",
-  "refresh_token": "jwt..."
+  "success": true,
+  "data": {
+    "user": {
+      "id": "uuid-student-1",
+      "email": "student@example.com",
+      "role": "student"
+    },
+    "accessToken": "jwt-access-token-string",
+    "refreshToken": "jwt-refresh-token-string"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### POST `/auth/login`
-**Request:** `{ "email": "...", "password": "..." }`
-**Response 200:** giống register
+Đăng nhập tài khoản.
+
+**Request:**
+```json
+{
+  "email": "student@example.com",
+  "password": "secret123"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "uuid-student-1",
+      "email": "student@example.com",
+      "role": "student"
+    },
+    "accessToken": "jwt-access-token-string",
+    "refreshToken": "jwt-refresh-token-string"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/auth/google`
-Đăng nhập bằng Google OAuth.
+Đăng nhập thông qua tài khoản Google.
 
-**Request:** `{ "id_token": "google-id-token..." }`
-**Response 200:** giống register
+**Request:**
+```json
+{
+  "idToken": "google-id-token-here..."
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "uuid-student-1",
+      "email": "student@example.com",
+      "role": "student"
+    },
+    "accessToken": "jwt-access-token-string",
+    "refreshToken": "jwt-refresh-token-string"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/auth/refresh`
-**Request:** `{ "refresh_token": "..." }`
-**Response 200:** `{ "access_token": "jwt..." }`
+Lấy lại Access Token mới khi hết hạn sử dụng.
+
+**Request:**
+```json
+{
+  "refreshToken": "jwt-refresh-token-string"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "jwt-new-access-token-string"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ## 2. Courses & Curriculum (Khóa học & Bài học)
 
 ### GET `/courses`
-Danh sách khóa học, có filter & search.
+Danh sách các khóa học công khai, hỗ trợ tìm kiếm, lọc và phân trang.
 
-**Query params:** `?category=web-dev&level=beginner&search=react&page=1&limit=12`
+**Query Params:** `?category=web-dev&level=beginner&search=react&page=1&limit=12`
 
 **Response 200:**
 ```json
 {
+  "success": true,
   "data": [
     {
-      "id": "uuid",
+      "id": "uuid-course-1",
       "title": "React từ Zero đến Hero",
-      "thumbnail_url": "...",
+      "thumbnailUrl": "https://r2.cloudflare.com/thumbnails/react.jpg",
       "price": 499000,
-      "instructor": { "full_name": "Trần B" },
-      "rating_avg": 4.7,
-      "total_students": 1200
+      "instructor": {
+        "fullName": "Trần B"
+      },
+      "ratingAvg": 4.7,
+      "totalStudents": 1200
     }
   ],
-  "pagination": { "page": 1, "limit": 12, "total": 86 }
+  "pagination": {
+    "page": 1,
+    "limit": 12,
+    "total": 86
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### GET `/courses/:slug`
-Chi tiết 1 khóa học (trang public, đề cương không bao giờ chứa `video_id` của các bài học tính phí).
+Chi tiết thông tin một khóa học (trang public, đề cương không bao giờ trả về `videoId` hay URL phát của video có phí).
 
 **Response 200:**
 ```json
 {
-  "id": "uuid",
-  "title": "React từ Zero đến Hero",
-  "description": "...",
-  "price": 499000,
-  "modules": [
-    {
-      "title": "Chương 1: Giới thiệu",
-      "lessons": [
-        { "id": "uuid", "title": "Bài 1: Cài đặt", "duration_seconds": 360, "is_preview": true }
-      ]
-    }
-  ],
-  "is_enrolled": false
+  "success": true,
+  "data": {
+    "id": "uuid-course-1",
+    "title": "React từ Zero đến Hero",
+    "description": "Khóa học React toàn diện từ cơ bản...",
+    "price": 499000,
+    "modules": [
+      {
+        "title": "Chương 1: Giới thiệu",
+        "lessons": [
+          {
+            "id": "uuid-lesson-1",
+            "title": "Bài 1: Cài đặt môi trường",
+            "durationSeconds": 360,
+            "isPreview": true
+          }
+        ]
+      }
+    ],
+    "isEnrolled": false
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### POST `/courses` 🔒 *(role: instructor)*
-Tạo khóa học mới (draft).
+Giảng viên khởi tạo khóa học mới (ở chế độ Draft).
 
-**Request:** `{ "title": "...", "category_id": "uuid", "price": 499000, "level": "beginner" }`
+**Request:**
+```json
+{
+  "title": "React từ Zero đến Hero",
+  "categoryId": "uuid-category-1",
+  "price": 499000,
+  "level": "beginner"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-course-1",
+    "title": "React từ Zero đến Hero",
+    "status": "draft"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/courses/:id/modules` 🔒 *(role: instructor)*
-Thêm chương học.
+Thêm chương học mới vào khóa học.
+
+**Request:**
+```json
+{
+  "title": "Chương 1: Giới thiệu"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-module-1",
+    "title": "Chương 1: Giới thiệu",
+    "courseId": "uuid-course-1"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### GET `/lessons/upload-url` 🔒 *(role: instructor)*
-Giảng viên xin link upload video thẳng lên Cloudflare R2 (Direct Upload).
+Giảng viên xin link upload trực tiếp video bài học lên Cloudflare R2 (Direct Upload).
 
-**Query params:** `?filename=lesson_intro.mp4`
+**Query Params:** `?filename=lesson_intro.mp4`
 
 **Response 200:**
 ```json
 {
-  "upload_url": "https://r2.cloudflare.com/my-bucket/lessons/uuid-lesson_intro.mp4?X-Amz-Signature=...",
-  "video_id": "uuid-lesson_intro.mp4"
+  "success": true,
+  "data": {
+    "uploadUrl": "https://r2.cloudflare.com/my-bucket/lessons/uuid-lesson_intro.mp4?X-Amz-Signature=...",
+    "videoId": "uuid-lesson_intro.mp4"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### POST `/modules/:id/lessons` 🔒 *(role: instructor)*
-Thêm bài học mới.
+Tạo bài học mới thuộc chương học.
 
-**Request (nguồn R2):**
+**Request (Video từ Cloudflare R2):**
 ```json
 { 
   "title": "Bài 2: Sử dụng JSX", 
-  "video_source": "r2", 
-  "video_id": "uuid-lesson_intro.mp4", 
-  "duration_seconds": 600,
-  "is_preview": false 
+  "videoSource": "r2", 
+  "videoId": "uuid-lesson_intro.mp4", 
+  "durationSeconds": 600,
+  "isPreview": false 
 }
 ```
 
-**Request (nguồn YouTube):**
+**Response 201:**
 ```json
-{ 
-  "title": "Bài 3: Props là gì", 
-  "video_source": "youtube", 
-  "video_id": "dQw4w9WgXcQ", 
-  "duration_seconds": 300,
-  "is_preview": false 
+{
+  "success": true,
+  "data": {
+    "id": "uuid-lesson-2",
+    "title": "Bài 2: Sử dụng JSX",
+    "moduleId": "uuid-module-1",
+    "videoSource": "r2",
+    "videoId": "uuid-lesson_intro.mp4"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
-## 3. Cart & Voucher (Giỏ hàng)
+## 3. Cart & Voucher (Giỏ hàng & Mã giảm giá)
 
 ### POST `/cart/items` 🔒
-Thêm khóa học vào giỏ (lưu Redis theo `user_id`, TTL 48h sliding expiration, tự reset gia hạn khi có tương tác).
+Thêm một khóa học vào giỏ hàng (lưu Redis theo `userId`, TTL 48h sliding).
 
-**Request:** `{ "course_id": "uuid" }`
+**Request:**
+```json
+{
+  "courseId": "uuid-course-1"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Đã thêm khóa học vào giỏ hàng thành công."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### GET `/cart` 🔒
+Xem thông tin chi tiết giỏ hàng hiện tại.
+
 **Response 200:**
 ```json
 {
-  "items": [{ "course_id": "uuid", "title": "...", "price": 499000 }],
-  "subtotal": 998000
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "courseId": "uuid-course-1",
+        "title": "React từ Zero đến Hero",
+        "price": 499000
+      }
+    ],
+    "subtotal": 499000
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
-### DELETE `/cart/items/:course_id` 🔒
-Xóa 1 khóa học khỏi giỏ.
+### DELETE `/cart/items/:courseId` 🔒
+Xóa khóa học khỏi giỏ hàng.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Đã xóa khóa học khỏi giỏ hàng thành công."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/cart/apply-voucher` 🔒
-Áp voucher giảm giá cho giỏ hàng.
+Áp dụng mã giảm giá cho giỏ hàng hiện tại.
 
-**Request:** `{ "code": "SUMMER20" }`
+**Request:**
+```json
+{
+  "code": "SUMMER20"
+}
+```
 
 **Response 200:**
 ```json
-{ "valid": true, "discount_amount": 199600, "total": 798400 }
+{
+  "success": true,
+  "data": {
+    "valid": true,
+    "discountAmount": 99800,
+    "total": 399200
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
 ```
 
 ---
 
-## 4. Orders & Payment (Thanh toán VietQR)
+### POST `/vouchers` 🔒 *(role: admin, instructor)*
+Tạo mã giảm giá mới.
+
+**Request:**
+```json
+{
+  "code": "INSTRUCT25",
+  "discountType": "percent",
+  "discountValue": 25.00,
+  "minOrderAmount": 100000,
+  "maxUses": 100,
+  "scope": "course",
+  "courseId": "uuid-course-1",
+  "validFrom": "2026-06-26T17:00:00Z",
+  "validUntil": "2026-07-26T17:00:00Z"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-voucher-1",
+    "code": "INSTRUCT25",
+    "discountType": "percent",
+    "discountValue": 25.00,
+    "scope": "course",
+    "courseId": "uuid-course-1",
+    "maxUses": 100
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### GET `/vouchers` 🔒 *(role: admin, instructor)*
+Xem danh sách voucher do người dùng này quản lý/tạo ra.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid-voucher-1",
+      "code": "INSTRUCT25",
+      "discountType": "percent",
+      "discountValue": 25.00,
+      "scope": "course",
+      "courseId": "uuid-course-1",
+      "usedCount": 5,
+      "maxUses": 100
+    }
+  ],
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+## 4. Orders & Payment (Đơn hàng & Thanh toán)
 
 ### POST `/orders/checkout` 🔒
-Tạo đơn hàng từ giỏ hàng hiện tại, sinh mã VietQR quét thanh toán động.
+Thanh toán giỏ hàng hiện tại, trả về thông tin tùy theo phương thức thanh toán được chọn.
 
-**Request:** `{ "voucher_code": "SUMMER20" }` *(optional)*
+**Request (Thanh toán qua VietQR):**
+```json
+{
+  "voucherCode": "SUMMER20",
+  "paymentMethod": "vietqr"
+}
+```
+
+**Response 200 (VietQR):**
+```json
+{
+  "success": true,
+  "data": {
+    "orderId": "uuid-order-1",
+    "total": 399200,
+    "paymentMethod": "vietqr",
+    "qrCodeUrl": "https://api.vietqr.io/image/970415-123456789-Q4zK9t.jpg?amount=399200&addInfo=DH123",
+    "transactionReference": "DH123",
+    "message": "Vui lòng chuyển khoản đúng số tiền và nội dung chuyển khoản, sau đó tải lên ảnh minh chứng giao dịch."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+**Request (Thanh toán qua Stripe):**
+```json
+{
+  "voucherCode": "SUMMER20",
+  "paymentMethod": "stripe"
+}
+```
+
+**Response 200 (Stripe):**
+```json
+{
+  "success": true,
+  "data": {
+    "orderId": "uuid-order-2",
+    "total": 399200,
+    "paymentMethod": "stripe",
+    "stripeCheckoutUrl": "https://checkout.stripe.com/c/pay/cs_test_..."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### POST `/orders/:id/upload-proof` 🔒
+Học viên tải lên ảnh minh chứng chuyển khoản (Bill) đối với đơn hàng VietQR.
+
+**Request:** `multipart/form-data` chứa tệp `file` (ảnh minh chứng giao dịch).
 
 **Response 200:**
 ```json
 {
-  "order_id": "uuid",
-  "total": 798400,
-  "payment_method": "vietqr",
-  "qr_code_url": "https://api.vietqr.io/image/970415-123456789-Q4zK9t.jpg?amount=798400&addInfo=HOCVIEN_DH123",
-  "transaction_reference": "HOCVIEN_DH123"
+  "success": true,
+  "data": {
+    "message": "Ảnh minh chứng đã được tải lên thành công, đang chờ nhân viên vận hành duyệt.",
+    "status": "submitted_proof"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
-### POST `/orders/vietqr-webhook` *(Webhook Ngân hàng / Cổng dịch vụ gọi về)*
-Xử lý thanh toán tự động, verify chữ ký số để bảo mật tuyệt đối.
+### POST `/orders/stripe-webhook` *(Webhook Stripe gọi về)*
+Xử lý thanh toán tự động khi học viên thanh toán thành công qua Stripe.
 
-**Headers:** `X-Webhook-Signature: <hmac_sha256_signature>`
+**Headers:** `Stripe-Signature: t=1614...v3=...`
 
-**Request Body:**
+**Request Body:** Stripe Event JSON (chứa thông tin sự kiện giao dịch).
+
+**Response 200:**
 ```json
 {
-  "transaction_reference": "HOCVIEN_DH123",
-  "amount": 798400,
-  "status": "PAID",
-  "bank_transaction_id": "FT262356237"
+  "success": true,
+  "data": {
+    "received": true
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
-```
-
-**Logic Backend:**
-```
-1. Verify signature trong header bằng Webhook Secret để chặn request giả mạo.
-2. Mở Database Transaction với khóa dòng (SELECT ... FOR UPDATE) trên bảng orders theo transaction_reference.
-3. Nếu đơn hàng có trạng thái PENDING:
-   - Cập nhật trạng thái đơn hàng thành PAID.
-   - Cộng số dư balance cho Giảng viên tương ứng (sau khi trừ % phí sàn).
-   - Tạo bản ghi Enrollment tương ứng mở quyền truy cập khóa học.
-   - Xóa giỏ hàng trong Redis.
-   - Bắn sự kiện "order.paid" sang Kafka để gửi hóa đơn bất đồng bộ.
-4. Trả về HTTP 200 (Idempotency) để thông báo cho Webhook không gửi lại (retry) nữa.
 ```
 
 ---
 
-## 5. Learning & Progress (Học bài & Bảo mật Video)
+## 5. Learning & Progress (Học bài & Tiến độ)
 
 ### GET `/my-courses` 🔒
-Danh sách khóa học đã mua của học viên hiện tại.
-
----
-
-### GET `/courses/:id/learn` 🔒 *(phải đã mua)*
-Lấy danh sách đề cương đầy đủ để học. **Lưu ý:** Không trả về video_id hay link video của bài học tại đây để tránh trộm link.
+Danh sách các khóa học đã sở hữu của học viên hiện tại.
 
 **Response 200:**
 ```json
 {
-  "course_title": "...",
-  "modules": [
+  "success": true,
+  "data": [
     {
-      "title": "Chương 1",
-      "lessons": [
-        { "id": "uuid_lesson_1", "title": "Bài 1", "duration_seconds": 360, "is_completed": false }
-      ]
+      "id": "uuid-course-1",
+      "title": "React từ Zero đến Hero",
+      "progressPercent": 45
     }
-  ]
+  ],
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### GET `/courses/:id/learn` 🔒 *(Yêu cầu đã sở hữu khóa học)*
+Lấy toàn bộ khung đề cương chi tiết để bắt đầu học. **Lưu ý:** Không trả về `videoId` hay link video để bảo vệ bản quyền.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "courseTitle": "React từ Zero đến Hero",
+    "modules": [
+      {
+        "title": "Chương 1",
+        "lessons": [
+          {
+            "id": "uuid-lesson-1",
+            "title": "Bài 1: Cài đặt môi trường",
+            "durationSeconds": 360,
+            "isCompleted": false
+          }
+        ]
+      }
+    ]
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### GET `/lessons/:id/video` 🔒
-Lấy thông tin video bảo mật để phát trên player.
+Lấy liên kết video bài học bảo mật để phát trên Player của Client.
 
-**Logic Backend:**
-1. Lấy `user_id` đăng nhập trực tiếp từ Spring Security Context (JWT), kiểm tra xem học viên có sở hữu khóa học (`Enrollment`) chứa bài học này không, hoặc bài học có `is_preview = true` không.
-2. Nếu hợp lệ:
-   - Nếu `video_source == 'r2'`: Sinh **Presigned GET URL** từ Cloudflare R2 (hết hạn sau 15 phút). Trả về `{ "video_source": "r2", "video_url": "https://..." }`.
-   - Nếu `video_source == 'youtube'`: Trả về `{ "video_source": "youtube", "video_id": "abc123" }`.
-3. Nếu không có quyền: Trả về lỗi `403 Forbidden`.
+**Response 200 (Nguồn Cloudflare R2):**
+```json
+{
+  "success": true,
+  "data": {
+    "videoSource": "r2",
+    "videoUrl": "https://r2.cloudflare.com/bucket/lesson1.mp4?X-Amz-Expires=900&X-Amz-Signature=..."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+**Response 200 (Nguồn YouTube):**
+```json
+{
+  "success": true,
+  "data": {
+    "videoSource": "youtube",
+    "videoId": "dQw4w9WgXcQ"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/lessons/:id/progress` 🔒
-Cập nhật tiến độ xem định kỳ (gọi mỗi 30s từ Frontend).
-
-**Request:** `{ "watched_seconds": 90, "is_completed": false }`
-
-**Logic Backend:**
-1. Lấy `user_id` đăng nhập từ Spring Security.
-2. Đọc tiến độ học gần nhất và `last_updated_at` trong **Redis Hash** của học viên.
-3. Validate: `watched_seconds - cached_seconds <= (current_time - last_updated_at) + 3s`.
-4. Nếu hợp lệ: Cập nhật Redis Hash với giá trị mới và đặt `last_updated_at = current_time`.
-5. Khi kết thúc phiên học, chuyển bài, hoặc nếu `is_completed = true` -> Thực hiện ghi dồn xuống PostgreSQL (`lesson_progress`).
-6. Nếu tiến độ đạt >= 90% -> Tự động đánh dấu hoàn thành bài học, kiểm tra nếu hoàn thành toàn bộ khóa học -> Đẩy sự kiện Kafka `course.completed` sinh chứng chỉ.
-
----
-
-### POST `/courses/:id/reviews` 🔒 *(chỉ dành cho học viên đã mua khóa học)*
-Đánh giá khóa học.
-
----
-
-## 6. AI Chatbot Trợ giảng
-
-### POST `/courses/:id/ai-chat` 🔒 *(phải đã mua)*
-Gửi câu hỏi cho AI trợ giảng ngay trong trang học.
+Cập nhật định kỳ tiến độ xem video (được gọi từ Client mỗi 30 giây).
 
 **Request:**
 ```json
 {
-  "lesson_id": "uuid_lesson_1",
-  "message": "Em chưa hiểu đoạn định nghĩa JSX ở trên, giải thích lại giúp em."
+  "watchedSeconds": 90,
+  "isCompleted": false
 }
 ```
 
 **Response 200:**
 ```json
 {
-  "reply": "JSX viết tắt của JavaScript XML. Nó cho phép chúng ta viết mã HTML trong React..."
+  "success": true,
+  "data": {
+    "progressPercent": 45,
+    "isCompleted": false
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
-**Logic Backend:** Backend lấy context bài học (`course_title`, `lesson_title`, `lesson_description`) làm system prompt ghép với câu hỏi của học viên, gọi tới **Gemini 1.5 Flash API** để sinh câu trả lời thông minh.
+---
+
+### POST `/courses/:id/reviews` 🔒 *(Yêu cầu đã mua khóa học)*
+Đánh giá khóa học (từ 1 đến 5 sao) kèm bình luận.
+
+**Request:**
+```json
+{
+  "rating": 5,
+  "comment": "Khóa học rất hay, dễ hiểu!"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-review-1",
+    "rating": 5,
+    "comment": "Khóa học rất hay, dễ hiểu!",
+    "courseId": "uuid-course-1"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### GET `/lessons/:id/comments` 🔒
+Lấy danh sách các bình luận, thảo luận bài học (Q&A) theo cấu trúc phân cấp (cây thảo luận).
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "comments": [
+      {
+        "id": "uuid-cmt-1",
+        "user": {
+          "fullName": "Nguyễn Văn A",
+          "avatarUrl": "https://..."
+        },
+        "content": "Em gặp lỗi khi chạy lệnh npm run dev ạ.",
+        "createdAt": "2026-06-26T10:00:00Z",
+        "replies": [
+          {
+            "id": "uuid-cmt-2",
+            "user": {
+              "fullName": "Trần B (Giảng viên)",
+              "avatarUrl": "https://..."
+            },
+            "content": "Em kiểm tra lại xem đã chạy npm install chưa nhé.",
+            "createdAt": "2026-06-26T10:05:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### POST `/lessons/:id/comments` 🔒
+Viết bình luận mới hoặc phản hồi lại một bình luận có sẵn dưới video bài học.
+
+**Request:**
+```json
+{
+  "content": "Em làm được rồi ạ, cảm ơn thầy!",
+  "parentId": "uuid-cmt-1"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-cmt-3",
+    "content": "Em làm được rồi ạ, cảm ơn thầy!",
+    "parentId": "uuid-cmt-1",
+    "createdAt": "2026-06-26T10:10:00Z"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+## 6. AI Chatbot Trợ giảng
+
+### POST `/courses/:id/ai-chat` 🔒 *(Yêu cầu đã sở hữu khóa học)*
+Gửi câu hỏi và thảo luận với AI trợ giảng ngay trong bài học.
+
+**Request:**
+```json
+{
+  "lessonId": "uuid-lesson-1",
+  "message": "JSX viết tắt của từ gì thế AI?"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "reply": "JSX viết tắt của cụm từ JavaScript XML. Nó cho phép ta viết cú pháp HTML trong tệp JavaScript..."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ## 7. Certificates (Chứng chỉ)
 
 ### GET `/certificates/:code/verify`
-Kiểm tra tính hợp lệ của chứng chỉ (Public).
+Kiểm tra tính hợp lệ của chứng chỉ công khai thông qua mã định danh.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "isValid": true,
+    "studentName": "Nguyễn Văn A",
+    "courseTitle": "React từ Zero đến Hero",
+    "issuedAt": "2026-06-26T12:00:00Z"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ## 8. Instructor & Wallet (Giảng viên & Rút tiền)
 
 ### GET `/instructor/revenue` 🔒 *(role: instructor)*
-Thống kê doanh thu và số dư khả dụng (`balance`) hiện tại.
+Thống kê ví tiền, tổng thu nhập và số dư có thể rút của Giảng viên.
 
 **Response 200:**
 ```json
 {
-  "balance": 15400000.00,
-  "total_earned": 28000000.00,
-  "total_withdrawn": 12600000.00
+  "success": true,
+  "data": {
+    "balance": 15400000.00,
+    "totalEarned": 28000000.00,
+    "totalWithdrawn": 12600000.00
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
 }
 ```
 
 ---
 
 ### POST `/instructor/withdrawals` 🔒 *(role: instructor)*
-Yêu cầu rút tiền về tài khoản ngân hàng.
+Gửi yêu cầu rút tiền về tài khoản ngân hàng cá nhân.
 
 **Request:**
 ```json
 {
   "amount": 5000000.00,
-  "bank_name": "Vietcombank",
-  "account_number": "1012345678",
-  "account_holder": "TRAN VAN B"
+  "bankName": "Vietcombank",
+  "accountNumber": "1012345678",
+  "accountHolder": "TRAN VAN B"
 }
 ```
 
-**Logic Backend:** Kiểm tra số dư `balance` hiện tại của Giảng viên. Nếu đủ số tiền rút, tạo yêu cầu rút tiền với trạng thái `PENDING` và khóa tạm thời số tiền này lại (hoặc trừ thẳng số dư).
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "requestId": "uuid-request-1",
+    "status": "pending",
+    "amount": 5000000.00
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### GET `/instructor/withdrawals` 🔒 *(role: instructor)*
-Xem danh sách lịch sử yêu cầu rút tiền.
+Xem lịch sử danh sách yêu cầu rút tiền của giảng viên hiện tại.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid-request-1",
+      "amount": 5000000.00,
+      "status": "pending",
+      "createdAt": "2026-06-26T18:00:00Z"
+    }
+  ],
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ## 9. Admin Operations (Duyệt khóa học & Duyệt rút tiền) 🔒 *(role: admin)*
 
 ### POST `/admin/courses/:id/approve`
-Phê duyệt khóa học lên sàn. Khóa học chuyển trạng thái thành `PUBLISHED`.
+Phê duyệt và xuất bản khóa học lên sàn thương mại.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-course-1",
+    "status": "published"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/admin/courses/:id/reject`
-Từ chối duyệt khóa học. Khóa học về trạng thái `REJECTED` kèm cột lưu lý do từ chối gửi về giảng viên.
+Từ chối xuất bản khóa học và gửi trả về kèm theo lý do từ chối.
 
-**Request:** `{ "reject_reason": "Video bài học số 3 bị lỗi tiếng." }`
+**Request:**
+```json
+{
+  "rejectReason": "Nội dung chương 3 không đúng chuẩn chuẩn mực..."
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-course-1",
+    "status": "rejected",
+    "rejectReason": "Nội dung chương 3 không đúng chuẩn chuẩn mực..."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/admin/withdrawals/:id/approve`
-Admin xác nhận đã chuyển khoản ngân hàng thủ công thành công bên ngoài và duyệt yêu cầu.
+Phê duyệt yêu cầu rút tiền của giảng viên (sau khi Admin đã thực hiện chuyển tiền thành công bên ngoài ngân hàng).
 
-**Logic Backend:** Trạng thái yêu cầu rút tiền chuyển từ `PENDING` sang `APPROVED`. Cập nhật số dư `balance` chính thức của giảng viên (nếu chưa trừ lúc tạo yêu cầu).
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-request-1",
+    "status": "approved"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
 
 ---
 
 ### POST `/admin/withdrawals/:id/reject`
-Admin từ chối yêu cầu rút tiền do sai thông tin hoặc có khiếu nại vi phạm.
+Từ chối yêu cầu rút tiền và hoàn tiền lại ví số dư cho giảng viên.
 
-**Request:** `{ "reject_reason": "Tên tài khoản không khớp với tên giảng viên." }`
+**Request:**
+```json
+{
+  "rejectReason": "Tên chủ tài khoản không khớp với tên giảng viên đã xác minh."
+}
+```
 
-**Logic Backend:** Trạng thái chuyển thành `REJECTED`. Hoàn trả lại số tiền về số dư `balance` khả dụng cho Giảng viên.
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid-request-1",
+    "status": "rejected",
+    "rejectReason": "Tên chủ tài khoản không khớp với tên giảng viên đã xác minh."
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+## 10. Staff Operations (Đối soát thanh toán VietQR) 🔒 *(role: staff, admin)*
+
+### GET `/staff/orders/pending-proof`
+Lấy danh sách các đơn hàng VietQR đã tải ảnh minh chứng đang chờ đối soát.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "orderId": "uuid-order-1",
+      "user": {
+        "fullName": "Nguyễn Văn A",
+        "email": "student@example.com"
+      },
+      "total": 399200,
+      "transactionReference": "DH123",
+      "transactionProofUrl": "https://r2.cloudflare.com/proofs/bill_dh123.jpg",
+      "createdAt": "2026-06-26T18:00:00Z"
+    }
+  ],
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### POST `/staff/orders/:id/approve-proof`
+Duyệt thanh toán thành công cho đơn hàng VietQR.
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Đơn hàng đã được duyệt thanh toán thành công, đã tạo enrollment.",
+    "status": "PAID"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
+
+---
+
+### POST `/staff/orders/:id/reject-proof`
+Từ chối minh chứng đơn hàng VietQR (do sai số tiền, sai nội dung hoặc minh chứng giả).
+
+**Request:**
+```json
+{
+  "rejectReason": "Số tiền chuyển khoản thực tế không khớp (chuyển thiếu 20.000đ)."
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Đơn hàng đã bị từ chối duyệt minh chứng.",
+    "status": "rejected_proof"
+  },
+  "timestamp": "2026-06-26T12:00:00Z"
+}
+```
