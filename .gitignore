@@ -3,3 +3,11 @@
 
 # Ẩn tệp agent.md ở bất kỳ đâu trong dự án
 AGENTS.md
+
+# Ẩn thư mục Claude và Specify
+.claude/
+.specify/
+
+
+# Ẩn thư mục specs và mọi thứ bên trong nó
+specs/*

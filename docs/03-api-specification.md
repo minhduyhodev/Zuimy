@@ -555,18 +555,33 @@ Thanh toán giỏ hàng hiện tại, trả về thông tin tùy theo phương t
 
 ---
 
-### POST `/orders/:id/upload-proof` 🔒
-Học viên tải lên ảnh minh chứng chuyển khoản (Bill) đối với đơn hàng VietQR.
+### POST `/orders/vietqr-webhook` *(Webhook VietQR nhận từ cổng thanh toán)*
+Xử lý thanh toán tự động khi đối tác thanh toán (PayOS/Casso/SePay) gửi Webhook biến động số dư chuyển khoản VietQR thành công.
 
-**Request:** `multipart/form-data` chứa tệp `file` (ảnh minh chứng giao dịch).
+**Headers:**
+- `x-api-key`: Hoặc chữ ký số bảo mật `Signature` để xác thực nguồn gửi.
+
+**Request Body:**
+```json
+{
+  "success": true,
+  "data": {
+    "orderCode": 10293,
+    "amount": 399200,
+    "description": "DH123 thanh toan khoa hoc",
+    "reference": "FT2617823912",
+    "transactionDateTime": "2026-06-27T09:50:00Z"
+  },
+  "signature": "6a9e1d8820c749b567b57b54..."
+}
+```
 
 **Response 200:**
 ```json
 {
   "success": true,
   "data": {
-    "message": "Ảnh minh chứng đã được tải lên thành công, đang chờ nhân viên vận hành duyệt.",
-    "status": "submitted_proof"
+    "message": "Webhook processed successfully, order updated to PAID."
   },
   "timestamp": "2026-06-26T12:00:00Z"
 }
@@ -990,71 +1005,3 @@ Từ chối yêu cầu rút tiền và hoàn tiền lại ví số dư cho giả
 }
 ```
 
----
-
-## 10. Staff Operations (Đối soát thanh toán VietQR) 🔒 *(role: staff, admin)*
-
-### GET `/staff/orders/pending-proof`
-Lấy danh sách các đơn hàng VietQR đã tải ảnh minh chứng đang chờ đối soát.
-
-**Response 200:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "orderId": "uuid-order-1",
-      "user": {
-        "fullName": "Nguyễn Văn A",
-        "email": "student@example.com"
-      },
-      "total": 399200,
-      "transactionReference": "DH123",
-      "transactionProofUrl": "https://r2.cloudflare.com/proofs/bill_dh123.jpg",
-      "createdAt": "2026-06-26T18:00:00Z"
-    }
-  ],
-  "timestamp": "2026-06-26T12:00:00Z"
-}
-```
-
----
-
-### POST `/staff/orders/:id/approve-proof`
-Duyệt thanh toán thành công cho đơn hàng VietQR.
-
-**Response 200:**
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Đơn hàng đã được duyệt thanh toán thành công, đã tạo enrollment.",
-    "status": "PAID"
-  },
-  "timestamp": "2026-06-26T12:00:00Z"
-}
-```
-
----
-
-### POST `/staff/orders/:id/reject-proof`
-Từ chối minh chứng đơn hàng VietQR (do sai số tiền, sai nội dung hoặc minh chứng giả).
-
-**Request:**
-```json
-{
-  "rejectReason": "Số tiền chuyển khoản thực tế không khớp (chuyển thiếu 20.000đ)."
-}
-```
-
-**Response 200:**
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Đơn hàng đã bị từ chối duyệt minh chứng.",
-    "status": "rejected_proof"
-  },
-  "timestamp": "2026-06-26T12:00:00Z"
-}
-```

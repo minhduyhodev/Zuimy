@@ -273,7 +273,50 @@
 
 ---
 
-## 6. Sơ đồ phân quyền các vai trò hệ thống
+## 6. Luồng chi tiết — Xác thực, Đăng nhập Google & Xử lý xung đột (Authentication Flow)
+
+```
+[Màn hình Đăng nhập / Đăng ký]
+        │
+        ├─── Chọn Đăng ký/Đăng nhập thường (Email + Mật khẩu) ────────────────────────┐
+        │                                                                            │
+        └─── Chọn Đăng nhập qua Google (OAuth2) ──────────────────────────┐          │
+                                                                          ▼          ▼
+                                                       [Frontend lấy ID Token]   [Frontend gửi Email + Pass]
+                                                                          │          │
+                                                                          ▼          ▼
+                                                       [POST /api/v1/auth/google] [POST /api/v1/auth/login]
+                                                                          │          │
+                                                                          ├──────────┘
+                                                                          ▼
+                                                       [Backend tìm user theo Email]
+                                                                          │
+         ┌────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────┐
+         ▼ User đã tồn tại                                                                                                         ▼ User chưa tồn tại
+[Kiểm tra phương thức đăng nhập đang dùng]                                                                                   [Đăng ký tài khoản mới]
+         │                                                                                                                         │
+         ├─── Đăng nhập Google:                                                                                                    ├─── Đăng ký thường:
+         │    ├─ user.google_id khác NULL ──► Đăng nhập thành công, trả JWT                                                        │    ├─ Kiểm tra trùng Email
+         │    └─ user.google_id là NULL (Account Local)                                                                            │    ├─ Mã hóa password_hash
+         │         └─ Tiến hành Auto-Link: cập nhật google_id = google_id từ token ──► Đăng nhập thành công, trả JWT                      │    └─ Tạo user (google_id = null)
+         │                                                                                                                         │
+         └─── Đăng nhập thường:                                                                                                    └─── Đăng ký qua Google:
+              ├─ user.password_hash khác NULL ──► Validate mật khẩu ──► Thành công: trả JWT / Thất bại: báo lỗi 401                       └─ Tạo user (password_hash = null,
+              └─ user.password_hash là NULL (Account Google thuần)                                                                            google_id = google_id)
+                   └─ Từ chối ──► Báo lỗi: "Tài khoản đăng ký qua Google, vui lòng đăng nhập bằng Google"
+```
+
+### Xử lý trong Profile Settings & Quên mật khẩu:
+*   **Trang cá nhân (Profile Settings):**
+    *   Nếu `password_hash` IS NULL: Ẩn hoàn toàn tính năng đổi mật khẩu.
+    *   Nếu `password_hash` IS NOT NULL: Hiển thị tính năng đổi mật khẩu (yêu cầu mật khẩu cũ).
+*   **Tính năng Quên mật khẩu (Forgot Password):**
+    *   Nếu `password_hash` IS NULL: Backend không tạo link reset. Gửi email thông báo: *"Tài khoản đăng ký qua Google, vui lòng đăng nhập bằng Google"*.
+    *   Nếu `password_hash` IS NOT NULL: Gửi link reset mật khẩu bình thường.
+
+---
+
+## 7. Sơ đồ phân quyền các vai trò hệ thống
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -309,3 +352,4 @@
 - **Bảo mật video ở mức tối đa:** Ẩn toàn bộ `video_id` ở API Đề cương. Chỉ trả link động 15 phút (Presigned GET URL R2) hoặc ID Youtube qua API xem bài học có xác thực JWT của Spring Security.
 - **Vấn đề đồng thì (Concurrency) của Voucher:** Khi học viên Checkout cùng lúc áp dụng voucher giới hạn lượt dùng, phải sử dụng transaction hoặc khóa bi quan/lạc quan để tránh việc vượt quá số lượng dùng tối đa (`max_uses`).
 - **Tránh trùng Certificate:** Cần check xem certificate đã được sinh cho `(user_id, course_id)` chưa trước khi tạo mới để tránh Kafka consumer chạy lại sự kiện gây lỗi trùng bản ghi.
+- **Xác thực tích hợp Google (OAuth2):** Xử lý Auto-Link khi trùng email đã xác thực, chặn đăng nhập mật khẩu với tài khoản Google thuần (tránh lỗi bảo mật), và ẩn tính năng đổi mật khẩu ở Profile / chặn reset mật khẩu qua email đối với tài khoản chưa có mật khẩu (`password_hash` IS NULL).

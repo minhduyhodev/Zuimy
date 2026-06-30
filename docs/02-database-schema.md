@@ -42,6 +42,12 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 | created_at | TIMESTAMP | |
 | updated_at | TIMESTAMP | |
 
+> [!NOTE]
+> **Quy tắc xác thực & Xử lý xung đột tài khoản (OAuth2 Google vs Local):**
+> * **Tài khoản Google thuần:** `password_hash` IS NULL, `google_id` NOT NULL. Giao diện Profile ẩn tính năng đổi mật khẩu. Khi Quên mật khẩu, Backend không tạo link reset mà gửi email thông báo yêu cầu đăng nhập qua Google.
+> * **Tài khoản Local:** `password_hash` NOT NULL, `google_id` IS NULL. Đăng nhập bằng mật khẩu bình thường.
+> * **Auto-Linking:** Nếu người dùng đã đăng ký Local trước đó bằng Gmail, khi họ bấm "Đăng nhập bằng Google", Backend sẽ tự động cập nhật `google_id` và liên kết tài khoản (cả hai trường đều NOT NULL). Giao diện Profile vẫn cho phép đổi mật khẩu.
+
 ---
 
 ## 2. `instructor_profiles` — Hồ sơ giảng viên
@@ -125,10 +131,9 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 | subtotal | DECIMAL(10,2) | tổng trước giảm giá |
 | discount_amount | DECIMAL(10,2) | số tiền được giảm |
 | total | DECIMAL(10,2) | số tiền thực tế phải thanh toán |
-| status | ENUM('pending','submitted_proof','paid','failed','cancelled','rejected_proof') | trạng thái đơn hàng |
+| status | ENUM('pending','paid','failed','cancelled') | trạng thái đơn hàng |
 | payment_method | ENUM('vietqr','stripe') | Phương thức thanh toán |
-| transaction_reference | VARCHAR(150) | Nội dung chuyển khoản hoặc mã tham chiếu giao dịch (đối soát Stripe hoặc nhập tay) |
-| transaction_proof_url | VARCHAR(255) | nullable, link ảnh minh chứng chuyển khoản tải lên cho VietQR |
+| transaction_reference | VARCHAR(150) | Mã nội dung chuyển khoản động (VietQR) hoặc mã tham chiếu giao dịch (Stripe) |
 | created_at | TIMESTAMP | |
 | paid_at | TIMESTAMP | nullable |
 
@@ -250,27 +255,124 @@ users ──┬──< enrollments >──┬── courses ──┬──< mod
 
 ---
 
-## Quan hệ chính (Foreign Keys)
+## Chiến lược Foreign Key & Index
+
+> Không đánh index toàn bộ cột. Chỉ dùng **Foreign Key** cho dữ liệu lõi cần bảo toàn quan hệ chặt chẽ; các dữ liệu phụ/log/snapshot có thể chỉ lưu UUID tham chiếu và kiểm tra bằng Backend nếu cần.
+
+### Foreign Key bắt buộc cho dữ liệu quan trọng
+
+Các quan hệ này nên khai báo FK thật trong PostgreSQL để tránh dữ liệu mồ côi:
 
 ```
-users.id            ← courses.instructor_id
-users.id            ← orders.user_id
-users.id            ← enrollments.user_id
-users.id            ← lesson_progress.user_id
-users.id            ← withdrawal_requests.instructor_id
-users.id            ← lesson_comments.user_id
-lessons.id          ← lesson_comments.lesson_id
-lesson_comments.id  ← lesson_comments.parent_id
-vouchers.created_by_id ← users.id
-vouchers.course_id  ← courses.id
-courses.id          ← modules.course_id
-modules.id          ← lessons.module_id
-courses.id          ← order_items.course_id
-orders.id           ← order_items.order_id
-vouchers.id         ← orders.voucher_id
-courses.id          ← enrollments.course_id
-lessons.id          ← lesson_progress.lesson_id
-courses.id          ← certificates.course_id
+users.id       ← instructor_profiles.user_id
+users.id       ← courses.instructor_id
+users.id       ← orders.user_id
+users.id       ← enrollments.user_id
+users.id       ← lesson_progress.user_id
+users.id       ← certificates.user_id
+
+categories.id  ← courses.category_id
+courses.id     ← modules.course_id
+modules.id     ← lessons.module_id
+orders.id      ← order_items.order_id
+courses.id     ← order_items.course_id
+courses.id     ← enrollments.course_id
+lessons.id     ← lesson_progress.lesson_id
+courses.id     ← certificates.course_id
+```
+
+### Quan hệ có thể dùng FK mềm hoặc xử lý bằng Backend
+
+Các quan hệ này không nhất thiết phải dùng FK cứng nếu muốn linh hoạt khi xóa/ẩn dữ liệu, nhưng Backend phải kiểm tra tồn tại khi tạo/cập nhật:
+
+```
+vouchers.id           ← orders.voucher_id        -- có thể ON DELETE SET NULL
+vouchers.course_id    → courses.id               -- voucher theo khóa học, có thể validate bằng Backend
+vouchers.created_by_id → users.id                -- lưu người tạo, có thể giữ snapshot/log
+lesson_comments.user_id → users.id               -- có thể giữ bình luận kể cả khi user bị khóa/xóa mềm
+lesson_comments.lesson_id → lessons.id           -- tùy chính sách xóa bài học
+lesson_comments.parent_id → lesson_comments.id   -- reply comment, có thể SET NULL khi comment cha bị xóa
+course_reviews.user_id → users.id                -- review có thể giữ lịch sử
+course_reviews.course_id → courses.id            -- tùy chính sách archive course
+withdrawal_requests.instructor_id → users.id     -- dữ liệu tài chính nên ưu tiên không xóa cứng user
+```
+
+### Quy tắc `ON DELETE` đề xuất
+
+- **Không xóa cứng dữ liệu tài chính/học tập đã phát sinh**: `orders`, `order_items`, `enrollments`, `certificates` nên được giữ để bảo toàn lịch sử.
+- **Course đã bán/published**: không `DELETE`, chỉ chuyển `status = 'archived'`.
+- **Course draft chưa ai mua**: có thể cho xóa, dùng `ON DELETE CASCADE` có kiểm soát cho `modules` và `lessons`.
+- **Voucher trong order**: nếu cho xóa voucher thì dùng `ON DELETE SET NULL`, nhưng vẫn giữ `discount_amount` trong order.
+- **Comment/review**: ưu tiên soft delete bằng `deleted_at` nếu cần kiểm duyệt, tránh mất lịch sử thảo luận.
+
+### Index đề xuất theo hướng doanh nghiệp
+
+#### Unique index / constraint
+
+```
+users(email)
+users(google_id)                  -- nullable unique nếu hỗ trợ Google OAuth
+categories(slug)
+courses(slug)
+vouchers(code)
+certificates(certificate_code)
+enrollments(user_id, course_id)
+lesson_progress(user_id, lesson_id)
+```
+
+#### Index cho query phổ biến và join
+
+```
+instructor_profiles(user_id)
+
+courses(instructor_id)
+courses(category_id)
+courses(category_id, status)
+courses(instructor_id, status)
+
+modules(course_id, position)
+lessons(module_id, position)
+
+orders(user_id, created_at)
+orders(transaction_reference)
+
+order_items(order_id)
+order_items(course_id)
+
+enrollments(user_id, course_id)
+enrollments(course_id)
+
+lesson_progress(user_id, lesson_id)
+lesson_progress(lesson_id)
+
+lesson_comments(lesson_id, created_at)
+lesson_comments(parent_id)
+
+course_reviews(course_id, created_at)
+course_reviews(user_id, course_id)
+
+certificates(user_id, course_id)
+
+withdrawal_requests(instructor_id, status)
+```
+
+#### Không index mặc định các cột ít lọc hoặc dữ liệu dài
+
+Không nên index bừa các cột chỉ dùng để hiển thị hoặc cập nhật thường xuyên:
+
+```
+users.full_name
+users.avatar_url
+courses.description
+courses.thumbnail_url
+instructor_profiles.bio
+orders.subtotal
+orders.discount_amount
+orders.total
+lesson_progress.watched_seconds
+lesson_comments.content
+course_reviews.comment
+withdrawal_requests.reject_reason
 ```
 
 ---
