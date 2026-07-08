@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: server
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zuimy
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  mail:
+    host: localhost
+    port: 1025
+    username: test@zuimy.com
+    password: testpassword
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+zuimy:
+  security:
+    jwt:
+      secret-key: "404E193B4949E49C2C5120D266A60FD582F92958C83CDFA46C6A8220F7AF968680B"
+      access-token-expiration: 900000 # 15 minutes (in ms)
+      refresh-token-expiration: 604800000 # 7 days (in ms)
+    google:
+      client-id: "your-google-client-id.apps.googleusercontent.com"
